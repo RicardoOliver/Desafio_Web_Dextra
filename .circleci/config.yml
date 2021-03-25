@@ -1,172 +1,31 @@
-version: 2.1
-orbs:
-  cloudfoundry: circleci/cloudfoundry@0.1.12
-  slack:        circleci/slack@1.0.0
-  saucelabs:    saucelabs/sauce-connect@1.0.1
-  maven:        circleci/maven@0.0.4
-
-workflows:
-  version: 2
-  build_deploy:
-    jobs:
-      - unit-test
-      - sum-coverage:
-          requires:
-            - unit-test
-      - saucelabs/with_proxy:
-          name: "Chrome Tests"
-          requires:
-            - unit-test
-          tunnel_identifier: chrome
-          steps:
-            - maven/with_cache:
-                steps:
-                  - run: ./mvnw verify -B -Dspring.profiles.active=it -Dsauce.tunnel="chrome" 
-      - saucelabs/with_proxy:
-          name: "IE Tests"
-          requires:
-            - unit-test
-          tunnel_identifier: ie
-          steps:
-            - maven/with_cache:
-                steps:
-                  - run: ./mvnw verify -B -Dspring.profiles.active=it -Dsauce.version=11.103 -Dsauce.tunnel="ie" -Dsauce.browser="internet explorer"    
-      - maven/test:
-          name: "Static Analysis"
-          command: 'clean org.jacoco:jacoco-maven-plugin:prepare-agent package sonar:sonar 
-                     -Dsonar.host.url=https://sonarcloud.io 
-                     -Dsonar.organization=circleci-demo 
-                     -Dsonar.login=${SONAR_KEY} 
-                     -Dsonar.branch.name=${CIRCLE_BRANCH}'
-          requires:
-            - unit-test
-      - package-jar:
-          requires:
-            - unit-test
-          filters:
-            branches:
-              only: master
-
-      - cloudfoundry/dark_deploy:
-          requires:
-            - package-jar
-          filters:
-            branches:
-              only: master
-          context: Demos-Context
-          appname: blueskygreenbuilds
-          org: eddies-org
-          space: circleci
-          workspace_path: /tmp
-          manifest: /tmp/cf-manifest.yml
-          package: /tmp/standalone-app.jar
-          domain: blueskygreenbuilds.com
-          validate_steps:
-            - slack/notify:
-                message: "The latest inventory is ready to ship, please review/approve ASAP! https://circleci.com/workflow-run/${CIRCLE_WORKFLOW_ID}"
-                mentions: UA8FDUL8P
-
-      - hold:
-          type: approval
-          requires:
-            - cloudfoundry/dark_deploy
-            - "IE Tests"
-            - "Chrome Tests"
-          filters:
-            branches:
-              only: master
-              
-      - cloudfoundry/live_deploy:
-          requires:
-            - hold
-          filters:
-            branches:
-              only: master
-          context: Demos-Context
-          appname: blueskygreenbuilds
-          org: eddies-org
-          space: circleci
-          domain: blueskygreenbuilds.com
-
-
-
+version: 2
 jobs:
-  unit-test:
+  build:
+
+    working_directory: ~/Desafio_Web_Dextra
+
     docker:
-      - image: circleci/openjdk:8
-    parallelism: 2
+      - image: circleci/openjdk:8-jdk-stretch
+
     steps:
+
       - checkout
-      - run:
-          name: Enable Test Splitting
-          command: |
-            mkdir -p .circleci/tests/
-            # generate excluded surefire tests using provided pattern
-            circleci tests glob src/test/java/**/*Test*.java | \
-              sed -e 's#^src/test/java/\(.*\)\.java#\1#' | \
-              tr "/" "." > .circleci/tests/surefire_classnames
-            cat .circleci/tests/surefire_classnames | \
-              circleci tests split --split-by=timings --timings-type=classname > /tmp/this_node_tests
-            cat .circleci/tests/surefire_classnames | \
-              grep -xvf /tmp/this_node_tests > .circleci/tests/surefire_classnames_ignore_list
-      - store_artifacts:
-          path: .circleci/tests/
-      - maven/with_cache:
-          steps:
-            - run:
-                name: Run Tests
-                command: mvn test -B -Dsurefire.excludesFile=.circleci/tests/surefire_classnames_ignore_list 
-      - maven/process_test_results:
-          test_results_path: target/surefire-reports
-      - run:
-          name: Collect Code Cov
-          command: |
-            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
-            chmod +x ./cc-test-reporter
-            ./mvnw jacoco:report #convert binary jacoco.exec to XML in target/site/jacoco
-            export JACOCO_SOURCE_PATH="src/main/java"
-            ./cc-test-reporter format-coverage -t jacoco  target/site/jacoco/jacoco.xml -o "coverage/codeclimate.$CIRCLE_NODE_INDEX.json"
-      - persist_to_workspace:
-          root: coverage
+
+      - restore_cache:
+
+          key: Desafio_Web_Dextra-{{ checksum "pom.xml" }}
+
+      - run: mvn dependency:go-offline # gets the project dependencies
+
+      - save_cache:
           paths:
-            - codeclimate.*.json
-    
-  sum-coverage:
-    docker:
-      - image: circleci/node:10
-        environment:
-          PARTS: 2
-    working_directory: ~/repo
-    steps:
-      - attach_workspace:
-          at: coverage
-      - run:
-          name: Aggregate Code Coverage
-          command: |
-            curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
-            chmod +x ./cc-test-reporter
-            ./cc-test-reporter sum-coverage --output - --parts $PARTS coverage/codeclimate.*.json | ./cc-test-reporter upload-coverage --debug --input -
-     
-  package-jar:
-    docker:
-      - image: circleci/openjdk@sha256:76e4d88773f25ac52c3f0c63bf63b8e346ce799fbfe3691566f03d987795c70f
-    working_directory: ~/repo
-    steps:
-      - checkout
-      - maven/with_cache:
-          steps: 
-            - run: mvn package -B -DskipTests=true
-      - run:
-          name: Copy deployment artifacts to workspace
-          command: |
-            cp target/blueskygreenbuilds-*.jar /tmp/standalone-app.jar
-            cp src/main/resources/deployment/cf-manifest.yml /tmp/
+            - ~/.m2
+          key: Desafio_Web_Dextra-{{ checksum "pom.xml" }}
+
+      - run: mvn clean verify
+
+      - store_test_results:
+          path: target/failsafe-reports
+
       - store_artifacts:
-          path: /tmp/standalone-app.jar
-      - store_artifacts:
-          path: /tmp/cf-manifest.yml
-      - persist_to_workspace:
-          root: /tmp
-          paths:
-            - standalone-app.jar
-            - cf-manifest.yml
+          path: target/site/serenity
