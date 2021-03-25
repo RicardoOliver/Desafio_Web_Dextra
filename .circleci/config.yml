@@ -25,7 +25,7 @@ jobs:
       - run: mvn clean verify
 
       - store_test_results:
-          path: target/failsafe-reports
+          path: Desafio_Web_Dextra/target/evidencia
 
       - store_artifacts:
-          path: target/site/serenity
+          path: Desafio_Web_Dextra/target/test-classes
