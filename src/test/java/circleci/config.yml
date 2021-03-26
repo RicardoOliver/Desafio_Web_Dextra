@@ -1,110 +1,31 @@
-# Versão do CircleCI que estamos utilizando
 version: 2
-
-# Jobs são os passos que serão executados ao realizarmos um commit
 jobs:
-  checkout_code:
+  build:
+
+    working_directory: ~/Desafio_Web_Dextra
+
     docker:
-      - image: cimg/openjdk:16.0.0
-    working_directory: ~/DESAFIO_SKY_WEB
-    
-    # Neste step estamos fazendo o primeiro passo, que é o checkout, como o git clone que executamos anteriormente. 
-    # Aqui também salvamos em cache o repositório para agilizar os próximos passos.
+      - image: circleci/openjdk:8-jdk-stretch
+
     steps:
+
       - checkout
-      - save_cache:
-          key: google-repo-{{ .Environment.CIRCLE_SHA1 }}
-          paths:
-            - ~/DESAFIO_SKY_WEB
 
-  # Neste step vamos baixar as dependências do nosso problema, no caso, as gem's. 
-  # Como no passo checkout_code, salvamos as dependências em cache, sempre pensando na otimização dos passos seguintes.
-  bundle_dependencies:
-    working_directory: ~/DESAFIO_SKY_WEB
-    docker:
-      - image: cimg/openjdk:16.0.0
-    steps:
       - restore_cache:
-          keys:
-            - google-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          keys:
-            - google-bundle-{{ .Branch }}
-      - run: 
-          name: Bundle install
-          command: bundle install --path vendor/bundle
-      - save_cache:
-          key: google-bundle-{{ .Branch }}-{{ epoch }}
-          paths:
-            - ~/DESAFIO_SKY_WEB /vendor/bundle
-      - save_cache:
-          key: google-bundle-{{ .Branch }}
-          paths: 
-            - ~/DESAFIO_SKY_WEB /vendor/bundle
-  
-  # Aqui está nosso primeiro teste, a análise estática do código. 
-  # Como fizemos manualmente, nós baixamos as dependências e executamos o comando rubocop
-  code_analyzer:
-    working_directory: ~/DESAFIO_SKY_WEB
-    docker:
-      - image: cimg/openjdk:16.0.0
-    steps:
-      - restore_cache:
-          keys:
-            - google-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          keys:
-            - google-bundle-{{ .Branch }}
-      - run: 
-          name: Bundle install
-          command: bundle install --path vendor/bundle
-      - run:
-          name: Rubocop analyzer
-          command: bundle exec rubocop
 
-  # Aqui está nosso segundo teste, os testes de interface.
-  # Como fizemos manualmente, nós baixamos as dependências e executamos o comando cucumber
-  # Além disso, salvamos os artefatos gerados pela execução dos testes
-  chrome_test:
-    working_directory: ~/DESAFIO_SKY_WEB
-    docker:
-      - image: cimg/openjdk:16.0.0:latest-browsers
-    steps:
-      - restore_cache:
-          keys:
-            - google-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          keys:
-            - google-bundle-{{ .Branch }}
-      - run: 
-          name: Bundle install
-          command: bundle install --path vendor/bundle
-      - run: 
-          name: Execute all features scenarios (except @wip tags) on Goole Chrome browser
-          command: |
-            mkdir /tmp/test-results
-            bundle exec cucumber --format junit --out /tmp/test-results/junit.xml
+          key: Desafio_Web_Dextra-{{ checksum "pom.xml" }}
+
+      - run: mvn dependency:go-offline # gets the project dependencies
+
+      - save_cache:
+          paths:
+            - ~/.m2
+          key: Desafio_Web_Dextra-{{ checksum "pom.xml" }}
+
+      - run: mvn clean verify
+
       - store_test_results:
-          path: /tmp/test-results/junit.xml
-      - store_artifacts:
-          path: /tmp/test-results/junit.xml
+          path: Desafio_Web_Dextra/target/evidencia
 
-# Aqui começa a mágia, que nada mais é que a configuramos do workflow
-workflows:
-  version: 2
-  build_and_test:
-    # Ao commitar, o sistema vai seguir a seguinte ordem, executando cada un dos jobs, na ordem definidada aqui.
-    # No caso, ele fará o seguinte: 'checkout_code' > 'bundle_dependencies' > 'code_analyzer' > 'chrome_test'
-    # Configuramos essa ordem através do atributo 'requires' dentro dos jobs abaixo.
-    jobs:
-      - checkout_code
-      - bundle_dependencies:
-          requires: 
-            - checkout_code
-      - code_analyzer:
-          requires:
-            - bundle_dependencies
-      - chrome_test:
-          requires:
-            - bundle_dependencies
-            - code_analyzer
+      - store_artifacts:
+          path: Desafio_Web_Dextra/target/test-classes
